@@ -1,0 +1,508 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum Position {
+  C
+  B1
+  B2
+  B3
+  SS
+  LF
+  CF
+  RF
+  SP
+  RP
+  CL
+}
+
+enum Handedness {
+  L
+  R
+  S
+}
+
+enum DevStage {
+  PROSPECT
+  RISING
+  PRIME
+  DECLINING
+  TWILIGHT
+}
+
+enum SeasonStatus {
+  OFFSEASON
+  IN_PROGRESS
+  PLAYOFFS
+  COMPLETED
+}
+
+enum GameStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  POSTPONED
+}
+
+enum RosterStatus {
+  ACTIVE
+  MINORS
+  IL_10
+  IL_60
+  RELEASED
+}
+
+enum TransactionType {
+  TRADE
+  FA_SIGNING
+  FA_DEPARTURE
+  DRAFT
+  CALLUP
+  OPTION_DOWN
+  IL_PLACEMENT
+  IL_RETURN
+  RELEASE
+  RETIREMENT
+}
+
+enum AwardType {
+  MVP
+  CY_YOUNG
+  ROOKIE_OF_YEAR
+  BATTING_TITLE
+  ERA_TITLE
+  GOLD_GLOVE
+  SILVER_SLUGGER
+  CHAMPION
+}
+
+enum EventType {
+  SINGLE
+  DOUBLE
+  TRIPLE
+  HOME_RUN
+  WALK
+  STRIKEOUT
+  GROUNDOUT
+  FLYOUT
+  LINEOUT
+  STOLEN_BASE
+  CAUGHT_STEALING
+  ERROR
+  PITCHING_CHANGE
+  INNING_START
+  INNING_END
+  GAME_END
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEAGUE + TEAM
+// ─────────────────────────────────────────────────────────────────────────────
+
+model League {
+  id                  String  @id @default(cuid())
+  name                String
+  currentYear         Int     @default(1)
+
+  // Salary cap settings (values in thousands, e.g. 150000 = $150M)
+  salaryCap           Int     @default(150000)
+  luxuryTaxThreshold  Int     @default(185000)
+  luxuryTaxRate       Float   @default(0.50)
+  minSalary           Int     @default(720)    // $720K
+  maxSalary           Int     @default(40000)  // $40M
+
+  teams    Team[]
+  seasons  Season[]
+
+  createdAt DateTime @default(now())
+}
+
+model Team {
+  id             String  @id @default(cuid())
+  leagueId       String
+  name           String
+  city           String
+  abbreviation   String  @db.VarChar(3)
+  primaryColor   String
+  secondaryColor String
+  logoSeed       String
+  isUserTeam     Boolean @default(false)
+
+  // Financials — updated each offseason
+  budget         Int     @default(150000)  // spending budget this season (thousands)
+
+  league         League          @relation(fields: [leagueId], references: [id])
+  contracts      Contract[]
+  homeGames      Game[]          @relation("HomeTeam")
+  awayGames      Game[]          @relation("AwayTeam")
+  standings      TeamStanding[]
+  awards         Award[]
+  transactions   Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@index([leagueId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLAYER
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Player {
+  id        String     @id @default(cuid())
+  firstName String
+  lastName  String
+  position  Position
+  birthYear Int        // age = season.year - birthYear
+  bats      Handedness
+  throws    Handedness
+
+  // Career ceiling — set at generation, never changes
+  potential Int
+
+  // Current ratings (1–100); updated by progression engine each offseason
+  contact      Int
+  power        Int
+  eye          Int
+  speed        Int
+  velocity     Int
+  movement     Int
+  control      Int
+  stamina      Int
+  glove        Int
+  arm          Int
+  clutch       Int
+  durability   Int
+  coachability Int
+
+  developmentStage DevStage @default(PROSPECT)
+  isRetired        Boolean  @default(false)
+
+  contracts          Contract[]
+  ratingHistory      PlayerRatingSnapshot[]
+  batterGameStats    BatterGameStat[]
+  pitcherGameStats   PitcherGameStat[]
+  batterSeasonStats  BatterSeasonStat[]
+  pitcherSeasonStats PitcherSeasonStat[]
+  awards             Award[]
+  transactions       Transaction[]
+
+  createdAt DateTime @default(now())
+}
+
+// Immutable snapshot of ratings taken at the start of each season
+model PlayerRatingSnapshot {
+  id               String   @id @default(cuid())
+  playerId         String
+  seasonYear       Int
+  contact          Int
+  power            Int
+  eye              Int
+  speed            Int
+  velocity         Int
+  movement         Int
+  control          Int
+  stamina          Int
+  glove            Int
+  arm              Int
+  clutch           Int
+  durability       Int
+  coachability     Int
+  developmentStage DevStage
+
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([playerId, seasonYear])
+}
+
+// One active Contract per player per team tenure.
+// On a trade, the old contract is deactivated and a new one created.
+model Contract {
+  id             String       @id @default(cuid())
+  playerId       String
+  teamId         String
+  salary         Int          // annual value in thousands
+  yearsTotal     Int
+  yearsRemaining Int
+  rosterStatus   RosterStatus @default(ACTIVE)
+  isActive       Boolean      @default(true)
+  isProspect     Boolean      @default(false)
+  jerseyNumber   Int?
+  acquiredVia    String?      // "DRAFT" | "FA" | "TRADE"
+
+  player Player @relation(fields: [playerId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([teamId, isActive])
+  @@index([playerId, isActive])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEASON + SCHEDULE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Season {
+  id       String       @id @default(cuid())
+  leagueId String
+  year     Int
+  status   SeasonStatus @default(OFFSEASON)
+
+  league       League             @relation(fields: [leagueId], references: [id])
+  games        Game[]
+  standings    TeamStanding[]
+  playerBattingStats  BatterSeasonStat[]
+  playerPitchingStats PitcherSeasonStat[]
+  awards       Award[]
+  draftPicks   DraftPick[]
+  transactions Transaction[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([leagueId, year])
+}
+
+model Game {
+  id           String     @id @default(cuid())
+  seasonId     String
+  homeTeamId   String
+  awayTeamId   String
+
+  // Real-world scheduled time (11am, 2pm, 5pm, or 8pm ET)
+  scheduledAt  DateTime
+
+  status       GameStatus @default(SCHEDULED)
+  homeScore    Int?
+  awayScore    Int?
+  inningsPlayed Int?
+  isPlayoff    Boolean    @default(false)
+  playoffRound Int?       // 1=WildCard, 2=DivSeries, 3=ChampSeries, 4=WorldSeries
+
+  season     Season           @relation(fields: [seasonId], references: [id])
+  homeTeam   Team             @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam   Team             @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  log        GameLog[]
+  batterStats    BatterGameStat[]
+  pitcherStats   PitcherGameStat[]
+
+  simulatedAt DateTime?
+
+  @@index([seasonId, scheduledAt])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@index([status, scheduledAt])
+}
+
+model GameLog {
+  id          String    @id @default(cuid())
+  gameId      String
+  inning      Int
+  isTop       Boolean   // true = top half (away batting)
+  sequence    Int       // ordering within the half-inning
+  eventType   EventType
+  text        String    // narrative string shown in play-by-play
+  homeScore   Int       // score state after this event
+  awayScore   Int
+  outs        Int       // outs after this event (0, 1, 2)
+  runnersOn   String    @default("000")  // "100" = runner on 1st, "111" = bases loaded
+  batterId    String?
+  pitcherId   String?
+
+  game Game @relation(fields: [gameId], references: [id])
+
+  @@index([gameId, inning, sequence])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model BatterGameStat {
+  id             String @id @default(cuid())
+  gameId         String
+  playerId       String
+  teamId         String
+  lineupSlot     Int    // 1–9
+  atBats         Int    @default(0)
+  hits           Int    @default(0)
+  doubles        Int    @default(0)
+  triples        Int    @default(0)
+  homeRuns       Int    @default(0)
+  rbi            Int    @default(0)
+  walks          Int    @default(0)
+  strikeouts     Int    @default(0)
+  runs           Int    @default(0)
+  stolenBases    Int    @default(0)
+  caughtStealing Int    @default(0)
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([gameId, playerId])
+}
+
+model PitcherGameStat {
+  id              String  @id @default(cuid())
+  gameId          String
+  playerId        String
+  teamId          String
+  isStarter       Boolean @default(true)
+  outsPitched     Int     @default(0)  // 3 outs = 1.0 IP
+  hitsAllowed     Int     @default(0)
+  earnedRuns      Int     @default(0)
+  walksAllowed    Int     @default(0)
+  strikeouts      Int     @default(0)
+  homeRunsAllowed Int     @default(0)
+  win             Boolean @default(false)
+  loss            Boolean @default(false)
+  save            Boolean @default(false)
+  holdEarned      Boolean @default(false)
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  player Player @relation(fields: [playerId], references: [id])
+
+  @@unique([gameId, playerId])
+}
+
+model BatterSeasonStat {
+  id             String @id @default(cuid())
+  playerId       String
+  seasonId       String
+  teamId         String
+  games          Int    @default(0)
+  atBats         Int    @default(0)
+  hits           Int    @default(0)
+  doubles        Int    @default(0)
+  triples        Int    @default(0)
+  homeRuns       Int    @default(0)
+  rbi            Int    @default(0)
+  walks          Int    @default(0)
+  strikeouts     Int    @default(0)
+  runs           Int    @default(0)
+  stolenBases    Int    @default(0)
+  caughtStealing Int    @default(0)
+  // Computed and stored for leaderboard queries
+  avg            Float  @default(0)
+  obp            Float  @default(0)
+  slg            Float  @default(0)
+  ops            Float  @default(0)
+
+  player Player @relation(fields: [playerId], references: [id])
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@unique([playerId, seasonId])
+  @@index([seasonId, homeRuns])
+  @@index([seasonId, avg])
+}
+
+model PitcherSeasonStat {
+  id              String @id @default(cuid())
+  playerId        String
+  seasonId        String
+  teamId          String
+  games           Int    @default(0)
+  gamesStarted    Int    @default(0)
+  outsPitched     Int    @default(0)
+  hitsAllowed     Int    @default(0)
+  earnedRuns      Int    @default(0)
+  walksAllowed    Int    @default(0)
+  strikeouts      Int    @default(0)
+  homeRunsAllowed Int    @default(0)
+  wins            Int    @default(0)
+  losses          Int    @default(0)
+  saves           Int    @default(0)
+  holds           Int    @default(0)
+  qualityStarts   Int    @default(0)
+  // Computed and stored
+  era             Float  @default(0)
+  whip            Float  @default(0)
+
+  player Player @relation(fields: [playerId], references: [id])
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@unique([playerId, seasonId])
+  @@index([seasonId, era])
+  @@index([seasonId, strikeouts])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STANDINGS, AWARDS, TRANSACTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TeamStanding {
+  id           String  @id @default(cuid())
+  teamId       String
+  seasonId     String
+  wins         Int     @default(0)
+  losses       Int     @default(0)
+  runsScored   Int     @default(0)
+  runsAllowed  Int     @default(0)
+  divisionRank Int?
+  playoffSeed  Int?
+  eliminated   Boolean @default(false)
+  champion     Boolean @default(false)
+
+  team   Team   @relation(fields: [teamId], references: [id])
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@unique([teamId, seasonId])
+  @@index([seasonId, wins])
+}
+
+model Award {
+  id       String    @id @default(cuid())
+  seasonId String
+  type     AwardType
+  playerId String
+  teamId   String
+
+  season Season @relation(fields: [seasonId], references: [id])
+  player Player @relation(fields: [playerId], references: [id])
+  team   Team   @relation(fields: [teamId], references: [id])
+
+  @@unique([seasonId, type])
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  seasonId    String
+  type        TransactionType
+  description String
+  playerId    String?
+  fromTeamId  String?
+  toTeamId    String?
+  salaryNote  Int?            // salary involved (FA signing, trade value)
+
+  season     Season  @relation(fields: [seasonId], references: [id])
+  player     Player? @relation(fields: [playerId], references: [id])
+  fromTeam   Team?   @relation(fields: [fromTeamId], references: [id])
+
+  occurredAt DateTime @default(now())
+
+  @@index([seasonId, type])
+}
+
+model DraftPick {
+  id             String  @id @default(cuid())
+  seasonId       String
+  round          Int
+  pickNumber     Int
+  originalTeamId String
+  currentTeamId  String  // may differ if the pick was traded
+  playerId       String? // null until selection is made
+  isUsed         Boolean @default(false)
+
+  season Season @relation(fields: [seasonId], references: [id])
+
+  @@unique([seasonId, round, pickNumber])
+}
