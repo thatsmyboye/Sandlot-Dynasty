@@ -1,10 +1,10 @@
 export type NarrativeContext = {
-  batterName: string;
-  pitcherName: string;
+  batterName: string;      // "Martinez"
+  pitcherName: string;     // "Chen"
   inning: number;
   isTop: boolean;
   outs: number;
-  runnersOn: string; // "000" | "100" | "010" | "001" | "110" | "101" | "011" | "111"
+  runnersOn: string;       // "000" | "100" | "010" | "001" | "110" | "101" | "011" | "111"
   homeScore: number;
   awayScore: number;
   homeTeam: string;
@@ -12,7 +12,7 @@ export type NarrativeContext = {
 };
 
 function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(Math.random() * arr.length)]!;
 }
 
 function toOrdinal(n: number): string {
@@ -37,7 +37,8 @@ function fill(template: string, ctx: NarrativeContext): string {
     .replace(/\{homeScore\}/g, String(ctx.homeScore))
     .replace(/\{awayScore\}/g, String(ctx.awayScore))
     .replace(/\{ordinal\}/g, toOrdinal(ctx.inning))
-    .replace(/\{inning\}/g, String(ctx.inning));
+    .replace(/\{inning\}/g, String(ctx.inning))
+    .replace(/\{outs\}/g, String(ctx.outs));
 }
 
 const templates: Record<string, string[]> = {
@@ -89,7 +90,7 @@ const templates: Record<string, string[]> = {
     "{pitcherName} blows a fastball past {batter} for the strikeout.",
     "{batter} chases a breaking ball in the dirt. Strike three, he's gone.",
     "Called strike three on the outside corner. {batter} didn't even flinch. He's out.",
-    "{pitcherName} gets {batter} swinging on a nasty slider. Punchout number {outs}.",
+    "{pitcherName} gets {batter} swinging on a nasty slider. Punchout.",
     "{batter} waves at a curveball in the dirt. Strikeout.",
     "{pitcherName} paints the black with a fastball. Strike three called. {batter} argues but he's out.",
     "A full count... {pitcherName} fires a changeup. {batter} is way out front — strike three!",
@@ -153,14 +154,6 @@ const templates: Record<string, string[]> = {
     "Out comes the manager, and here comes {pitcherName} from the pen.",
     "The hook is out. {pitcherName} strides in from the bullpen to stop the bleeding.",
   ],
-  INNING_START: [
-    "Top of the {ordinal} inning. {awayTeam} batting.",
-    "Bottom of the {ordinal} inning. {homeTeam} batting.",
-    "We head to the top of the {ordinal}. {awayTeam} sends it up.",
-    "The {homeTeam} come to bat in the bottom of the {ordinal}.",
-    "Top of the {ordinal} — {awayTeam} looking to get something going.",
-    "Bottom half of the {ordinal} inning. {homeTeam} up.",
-  ],
   INNING_END: [
     "Three up, three down.",
     "That'll end the half-inning.",
@@ -180,25 +173,29 @@ const templates: Record<string, string[]> = {
 };
 
 export function generateNarrative(eventType: string, ctx: NarrativeContext): string {
-  const pool = templates[eventType];
-  if (!pool || pool.length === 0) {
-    return `${eventType} — ${ctx.batterName} vs ${ctx.pitcherName}.`;
-  }
-
   // INNING_START is special — top vs bottom picks different subset
   if (eventType === "INNING_START") {
     const topTemplates = [
       "Top of the {ordinal} inning. {awayTeam} batting.",
       "We head to the top of the {ordinal}. {awayTeam} sends it up.",
       "Top of the {ordinal} — {awayTeam} looking to get something going.",
+      "Now batting in the top of the {ordinal}, the {awayTeam}.",
+      "The {awayTeam} come to bat in the top half of the {ordinal}.",
     ];
     const bottomTemplates = [
       "Bottom of the {ordinal} inning. {homeTeam} batting.",
       "The {homeTeam} come to bat in the bottom of the {ordinal}.",
       "Bottom half of the {ordinal} inning. {homeTeam} up.",
+      "Home side coming up — bottom of the {ordinal}.",
+      "Now batting in the bottom of the {ordinal}, the {homeTeam}.",
     ];
     const chosen = ctx.isTop ? pick(topTemplates) : pick(bottomTemplates);
     return fill(chosen, ctx);
+  }
+
+  const pool = templates[eventType];
+  if (!pool || pool.length === 0) {
+    return `${eventType} — ${ctx.batterName} vs ${ctx.pitcherName}.`;
   }
 
   return fill(pick(pool), ctx);
