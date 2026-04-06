@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-migrate:
+    name: Build & Migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      DATABASE_URL: postgresql://${{ secrets.PG_USER }}:${{ secrets.POSTGRES_PASSWORD }}@${{ secrets.PGHOST }}:${{ secrets.PGPORT }}/${{ secrets.PGDATABASE }}
+      NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
+      NEXTAUTH_URL: http://localhost:3000
+      NODE_ENV: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Sync database schema
+        run: npx prisma db push --accept-data-loss
+        # Uses db push because no prisma/migrations/ directory exists yet.
+        # --accept-data-loss suppresses interactive prompts in CI.
+        # Once migrations are initialized locally, replace with:
+        #   npx prisma migrate deploy
+
+      - name: Build Next.js app
+        run: npm run build
