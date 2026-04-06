@@ -8,7 +8,9 @@ import { trpc } from "./client";
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return "";
-  if (process.env.RAILWAY_STATIC_URL) return `https://${process.env.RAILWAY_STATIC_URL}`;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  if (process.env.RAILWAY_PUBLIC_DOMAIN)
+    return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
   return `http://localhost:${process.env.PORT ?? 3000}`;
 }
 
