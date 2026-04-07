@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 15
 
     env:
-      DATABASE_URL: postgresql://${{ secrets.PG_USER }}:${{ secrets.POSTGRES_PASSWORD }}@${{ secrets.PGHOST }}:${{ secrets.PGPORT }}/${{ secrets.PGDATABASE }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       NEXTAUTH_SECRET: ${{ secrets.NEXTAUTH_SECRET }}
       NEXTAUTH_URL: http://localhost:3000
       NODE_ENV: production
